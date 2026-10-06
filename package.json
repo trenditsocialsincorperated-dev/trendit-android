@@ -1,0 +1,26 @@
+{
+  "name": "trendit",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Trendit social media app - web and Android",
+  "scripts": {
+    "web": "echo \"Web files are in www/\"",
+    "cap:add:android": "cap add android",
+    "cap:sync": "cap sync",
+    "cap:open:android": "cap open android",
+    "cap:run:android": "cap run android",
+    "build": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.4.4",
+    "agora-token": "2.0.6",
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/app": "^7.4.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
