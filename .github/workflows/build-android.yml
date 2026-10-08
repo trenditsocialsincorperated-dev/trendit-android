@@ -44,6 +44,19 @@ jobs:
         run: |
           printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
+      - name: Create Android debug keystore
+        run: |
+          mkdir -p "$HOME/.config/.android"
+          keytool -genkeypair \
+            -keystore "$HOME/.config/.android/debug.keystore" \
+            -storepass android \
+            -keypass android \
+            -alias AndroidDebugKey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Get Android signing fingerprints
         working-directory: android
         run: |
