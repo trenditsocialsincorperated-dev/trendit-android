@@ -2705,12 +2705,17 @@
             return (hash % 2147483646) + 1;
         }
 
-        // When Trendit runs inside Capacitor, relative URLs resolve to
-        // https://localhost and therefore cannot reach the Netlify function.
-        // Set window.TRENDIt_AGORA_TOKEN_ENDPOINT to the public Netlify
-        // function URL for the production Android build.
+        // Capacitor Android loads the app from the local WebView origin, so a
+        // relative '/.netlify/functions/...' URL would incorrectly point at
+        // https://localhost instead of the public Netlify site. Keep the
+        // relative endpoint for the normal web app and use the live Netlify
+        // function directly on Android. The Agora app certificate stays
+        // server-side in Netlify environment variables.
         const TRENDIt_AGORA_TOKEN_ENDPOINT =
-            window.TRENDIt_AGORA_TOKEN_ENDPOINT || '/.netlify/functions/agora-token';
+            window.TRENDIt_AGORA_TOKEN_ENDPOINT ||
+            (isTrenditAndroid
+                ? 'https://trenditsocials.netlify.app/.netlify/functions/agora-token'
+                : '/.netlify/functions/agora-token');
 
         async function getAgoraToken(channel, uid) {
             const response = await fetch(TRENDIt_AGORA_TOKEN_ENDPOINT, {
