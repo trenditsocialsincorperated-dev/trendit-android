@@ -1671,7 +1671,7 @@
                 if (provider instanceof firebase.auth.GoogleAuthProvider) {
                     result = await nativeAuth.signInWithGoogle({
                         skipNativeAuth: true,
-                        useCredentialManager: true
+                        useCredentialManager: false
                     });
                 } else if (provider instanceof firebase.auth.GithubAuthProvider) {
                     result = await nativeAuth.signInWithGithub({ skipNativeAuth: true });
