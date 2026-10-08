@@ -44,11 +44,19 @@ jobs:
         run: |
           printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
-      - name: Create Android debug keystore
+      - name: Restore stable Android debug keystore
+        id: debug-keystore-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: trendit-android-debug-keystore-v1
+
+      - name: Create Android debug keystore if needed
+        if: steps.debug-keystore-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$HOME/.config/.android"
+          mkdir -p "$HOME/.android"
           keytool -genkeypair \
-            -keystore "$HOME/.config/.android/debug.keystore" \
+            -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
             -keypass android \
             -alias AndroidDebugKey \
