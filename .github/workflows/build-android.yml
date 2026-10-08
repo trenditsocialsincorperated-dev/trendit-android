@@ -48,15 +48,15 @@ jobs:
         id: debug-keystore-cache
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: trendit-android-debug-keystore-v1
+          path: ~/.config/.android/debug.keystore
+          key: trendit-android-debug-keystore-v2
 
       - name: Create Android debug keystore if needed
         if: steps.debug-keystore-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$HOME/.android"
+          mkdir -p "$HOME/.config/.android"
           keytool -genkeypair \
-            -keystore "$HOME/.android/debug.keystore" \
+            -keystore "$HOME/.config/.android/debug.keystore" \
             -storepass android \
             -keypass android \
             -alias AndroidDebugKey \
