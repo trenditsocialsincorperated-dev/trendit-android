@@ -99,4 +99,200 @@ jobs:
 
           matches = []
 
-          for path in
+          for path in Path(".").rglob("*.html"):
+              try:
+                  text = path.read_text(errors="ignore")
+              except Exception:
+                  continue
+
+              found = re.findall(
+                  r'https://i\.postimg\.cc/[^"\']*IMG-20260902-WA0001\.jpg',
+                  text
+              )
+
+              matches.extend(found)
+
+          if not matches:
+              raise SystemExit(
+                  "Could not find the existing Trendit logo URL in the HTML files."
+              )
+
+          logo_url = matches[0]
+
+          Path("/tmp/trendit_logo_url").write_text(logo_url)
+
+          print("Found Trendit logo source in the project.")
+          print(logo_url)
+          PY
+
+          LOGO_URL="$(cat /tmp/trendit_logo_url)"
+
+          curl -L --fail --retry 3 --retry-delay 2 \
+            "$LOGO_URL" \
+            -o /tmp/trendit-logo.jpg
+
+          test -s /tmp/trendit-logo.jpg
+
+          RES="android/app/src/main/res"
+
+          mkdir -p \
+            "$RES/mipmap-mdpi" \
+            "$RES/mipmap-hdpi" \
+            "$RES/mipmap-xhdpi" \
+            "$RES/mipmap-xxhdpi" \
+            "$RES/mipmap-xxxhdpi"
+
+          if command -v magick >/dev/null 2>&1; then
+            IMGTOOL="magick"
+          else
+            IMGTOOL="convert"
+          fi
+
+          create_icon() {
+            SIZE="$1"
+            OUTPUT="$2"
+
+            "$IMGTOOL" /tmp/trendit-logo.jpg \
+              -auto-orient \
+              -resize "${SIZE}x${SIZE}" \
+              -gravity center \
+              -background none \
+              -extent "${SIZE}x${SIZE}" \
+              -strip \
+              "$OUTPUT"
+          }
+
+          create_icon 48  "$RES/mipmap-mdpi/ic_launcher.png"
+          create_icon 72  "$RES/mipmap-hdpi/ic_launcher.png"
+          create_icon 96  "$RES/mipmap-xhdpi/ic_launcher.png"
+          create_icon 144 "$RES/mipmap-xxhdpi/ic_launcher.png"
+          create_icon 192 "$RES/mipmap-xxxhdpi/ic_launcher.png"
+
+          create_icon 48  "$RES/mipmap-mdpi/ic_launcher_round.png"
+          create_icon 72  "$RES/mipmap-hdpi/ic_launcher_round.png"
+          create_icon 96  "$RES/mipmap-xhdpi/ic_launcher_round.png"
+          create_icon 144 "$RES/mipmap-xxhdpi/ic_launcher_round.png"
+          create_icon 192 "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
+
+          rm -f \
+            "$RES/mipmap-anydpi-v26/ic_launcher.xml" \
+            "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+
+          text, icon_count = re.subn(
+              r'android:icon="[^"]*"',
+              'android:icon="@mipmap/ic_launcher"',
+              text,
+              count=1
+          )
+
+          text, round_count = re.subn(
+              r'android:roundIcon="[^"]*"',
+              'android:roundIcon="@mipmap/ic_launcher_round"',
+              text,
+              count=1
+          )
+
+          if icon_count == 0:
+              text = text.replace(
+                  "<application",
+                  '<application\n        android:icon="@mipmap/ic_launcher"',
+                  1
+              )
+
+          if round_count == 0:
+              text = text.replace(
+                  "<application",
+                  '<application\n        android:roundIcon="@mipmap/ic_launcher_round"',
+                  1
+              )
+
+          manifest.write_text(text)
+
+          print("Trendit launcher icon configured.")
+          PY
+
+          echo "Generated launcher icons:"
+          find "$RES" -path '*/mipmap-*/*ic_launcher*.png' -type f -print
+
+      - name: Restore stable Android debug keystore
+        id: debug-keystore-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.config/.android/debug.keystore
+          key: trendit-android-debug-keystore-v2
+
+      - name: Create Android debug keystore if needed
+        if: steps.debug-keystore-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.config/.android"
+
+          keytool -genkeypair \
+            -keystore "$HOME/.config/.android/debug.keystore" \
+            -storepass android \
+            -keypass android \
+            -alias AndroidDebugKey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Get Android signing fingerprints
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew signingReport
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Verify Android permissions and launcher icon
+        run: |
+          echo "Checking Android permissions..."
+
+          grep -q 'android.permission.CAMERA' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.RECORD_AUDIO' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.MODIFY_AUDIO_SETTINGS' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.READ_MEDIA_IMAGES' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.READ_MEDIA_VIDEO' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.READ_MEDIA_AUDIO' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.POST_NOTIFICATIONS' \
+            android/app/src/main/AndroidManifest.xml
+
+          test -f android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          echo "All required permissions and launcher icon files are present."
+
+      - name: Build Debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trendit-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
