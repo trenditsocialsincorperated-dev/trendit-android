@@ -35,15 +35,69 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      # Create a fresh Capacitor Android project
       - name: Create Android project
         run: npx cap add android
 
+      # Put the Firebase file into the newly created Android project
       - name: Add Firebase Android configuration
         env:
           FIREBASE_GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
         run: |
           printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" > android/app/google-services.json
 
+      # Add the permissions Trendit needs
+      - name: Add Android media, call, and notification permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+
+          if not manifest.exists():
+              raise SystemExit("AndroidManifest.xml was not found.")
+
+          text = manifest.read_text()
+
+          permissions = [
+              '    <uses-permission android:name="android.permission.CAMERA" />',
+              '    <uses-permission android:name="android.permission.RECORD_AUDIO" />',
+              '    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />',
+
+              # Android 13+ media permissions
+              '    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />',
+
+              # Android 12 and lower
+              '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />',
+
+              # Android 13+ notifications
+              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+          ]
+
+          missing = [p for p in permissions if p not in text]
+
+          if missing:
+              marker = "</manifest>"
+
+              if marker not in text:
+                  raise SystemExit("AndroidManifest.xml does not contain </manifest>.")
+
+              text = text.replace(
+                  marker,
+                  "\n".join(missing) + "\n" + marker,
+                  1
+              )
+
+              manifest.write_text(text)
+
+          print("AndroidManifest.xml permissions:")
+          print(manifest.read_text())
+          PY
+
+      # Keep the same debug signing certificate so Firebase SHA-1 stays stable
       - name: Restore stable Android debug keystore
         id: debug-keystore-cache
         uses: actions/cache@v4
@@ -55,6 +109,7 @@ jobs:
         if: steps.debug-keystore-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$HOME/.config/.android"
+
           keytool -genkeypair \
             -keystore "$HOME/.config/.android/debug.keystore" \
             -storepass android \
@@ -65,21 +120,53 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
+      # Show the signing certificate so Firebase can continue using the same SHA-1
       - name: Get Android signing fingerprints
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew signingReport
 
+      # Sync Capacitor
       - name: Sync Capacitor
         run: npx cap sync android
 
+      # Verify permissions survived Capacitor sync
+      - name: Verify Android permissions
+        run: |
+          echo "Checking AndroidManifest.xml..."
+
+          grep -q 'android.permission.CAMERA' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.RECORD_AUDIO' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.MODIFY_AUDIO_SETTINGS' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.READ_MEDIA_IMAGES' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.READ_MEDIA_VIDEO' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.READ_MEDIA_AUDIO' \
+            android/app/src/main/AndroidManifest.xml
+
+          grep -q 'android.permission.POST_NOTIFICATIONS' \
+            android/app/src/main/AndroidManifest.xml
+
+          echo "All required Android permissions are present."
+
+      # Build APK
       - name: Build Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
 
+      # Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
