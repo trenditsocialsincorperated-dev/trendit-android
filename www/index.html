@@ -1468,9 +1468,6 @@
         });
     </script>
 
-    <!-- Capacitor Firebase Authentication native OAuth bridge -->
-    <script src="firebase-authentication-plugin.js"></script>
-
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
@@ -1502,18 +1499,29 @@
         const auth = firebase.auth();
         const storage = firebase.storage();
 
-        // Android/Capacitor OAuth uses the native Firebase Authentication plugin.
-        // The native layer obtains the provider credential, then we pass that
-        // credential into the existing Firebase Web SDK so Firestore/Storage and
-        // the rest of Trendit continue using the same JS Firebase session.
+        // Capacitor Android uses an HTTPS localhost origin. OAuth popups are
+        // unreliable inside the Android WebView, so use Firebase's redirect
+        // flow there while keeping the existing popup flow on the normal web app.
         const isTrenditAndroid =
-            (window.Capacitor && typeof window.Capacitor.getPlatform === 'function' && window.Capacitor.getPlatform() === 'android') ||
-            (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform() && /Android/i.test(navigator.userAgent));
+            (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()) ||
+            (location.protocol === 'https:' && location.hostname === 'localhost' && /Android/i.test(navigator.userAgent));
 
         // Enforce Local Session Persistence (Keep logged in across browser closes/reloads)
         auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
+        // Complete an OAuth redirect when returning to Trendit. This is a no-op
+        // when there is no pending redirect.
+        if (isTrenditAndroid) {
+            auth.getRedirectResult().catch(error => {
+                console.error('[Trendit Auth] redirect sign-in failed:', error);
+                const message = error && error.message ? error.message : String(error);
+                if (message) alert('Sign-in could not be completed: ' + message);
+            });
+        }
+
         let currentUser = null;
+        let trenditFcmToken = null;
+        let trenditPushSetupStarted = false;
         let allPosts = [];
         let followingList = [];
         let bookmarks = JSON.parse(localStorage.getItem('trendit_bookmarks') || '[]');
@@ -1548,6 +1556,78 @@
         let ringtoneAudioContext = null;
         let ringtoneTimer = null;
 
+        // Android push notifications (Firebase Cloud Messaging via Capacitor).
+        // This uses the native plugin bridge exposed by Capacitor in the APK;
+        // normal browser users are left on the existing web experience.
+        function getTrenditPushPlugin() {
+            return window.Capacitor && window.Capacitor.Plugins
+                ? window.Capacitor.Plugins.PushNotifications
+                : null;
+        }
+
+        async function saveTrenditPushToken(tokenValue) {
+            if (!tokenValue) return;
+            trenditFcmToken = tokenValue;
+            if (!currentUser || !currentUser.uid) return;
+
+            try {
+                await db.collection('users').doc(currentUser.uid).set({
+                    fcmToken: tokenValue,
+                    fcmTokenUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    fcmPlatform: 'android'
+                }, { merge: true });
+                console.log('[Trendit Push] Device token saved for signed-in user.');
+            } catch (error) {
+                console.error('[Trendit Push] Could not save device token to Firestore:', error);
+            }
+        }
+
+        async function setupTrenditPushNotifications() {
+            if (!isTrenditAndroid || trenditPushSetupStarted) return;
+            trenditPushSetupStarted = true;
+
+            const PushNotifications = getTrenditPushPlugin();
+            if (!PushNotifications) {
+                console.warn('[Trendit Push] Native PushNotifications plugin is not available. Check that @capacitor/push-notifications is installed and synced.');
+                trenditPushSetupStarted = false;
+                return;
+            }
+
+            try {
+                await PushNotifications.addListener('registration', async (token) => {
+                    console.log('[Trendit Push] FCM registration completed.');
+                    await saveTrenditPushToken(token && token.value);
+                });
+
+                await PushNotifications.addListener('registrationError', (error) => {
+                    console.error('[Trendit Push] Registration failed:', error && error.error ? error.error : error);
+                });
+
+                await PushNotifications.addListener('pushNotificationReceived', (notification) => {
+                    console.log('[Trendit Push] Notification received while app is open:', notification);
+                });
+
+                await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+                    console.log('[Trendit Push] User tapped a notification:', event);
+                });
+
+                let permission = await PushNotifications.checkPermissions();
+                if (permission.receive === 'prompt' || permission.receive === 'prompt-with-rationale') {
+                    permission = await PushNotifications.requestPermissions();
+                }
+
+                if (permission.receive !== 'granted') {
+                    console.warn('[Trendit Push] Notification permission was not granted.');
+                    return;
+                }
+
+                await PushNotifications.register();
+            } catch (error) {
+                console.error('[Trendit Push] Could not initialize notifications:', error);
+                trenditPushSetupStarted = false;
+            }
+        }
+
         auth.onAuthStateChanged(async (user) => {
             if (user) {
                 const userDocRef = db.collection('users').doc(user.uid);
@@ -1568,6 +1648,12 @@
                 }
                 
                 currentUser = (await userDocRef.get()).data();
+                // Request Android notification permission only after sign-in.
+                // If a token was registered earlier, save it to this account now.
+                if (isTrenditAndroid) {
+                    if (trenditFcmToken) await saveTrenditPushToken(trenditFcmToken);
+                    setupTrenditPushNotifications();
+                }
                 document.getElementById('authLandingView').style.display = 'none';
                 document.getElementById('mainAppContent').style.display = 'flex';
                 document.getElementById('authBtn').style.display = 'block';
@@ -1646,77 +1732,16 @@
             }
         }
 
-        function getNativeFirebaseAuthPlugin() {
-            if (!window.Capacitor) return null;
-            if (typeof window.Capacitor.isPluginAvailable === 'function' &&
-                !window.Capacitor.isPluginAvailable('FirebaseAuthentication')) {
-                return null;
-            }
-            return (window.Capacitor.Plugins && window.Capacitor.Plugins.FirebaseAuthentication) || null;
-        }
-
         async function signInWithTrenditProvider(provider) {
             try {
-                if (!isTrenditAndroid) {
-                    await auth.signInWithPopup(provider);
-                    return;
-                }
-
-                const nativeAuth = getNativeFirebaseAuthPlugin();
-                if (!nativeAuth) {
-                    throw new Error('Trendit Android authentication module is not installed. Please rebuild the latest APK.');
-                }
-
-                let result;
-                if (provider instanceof firebase.auth.GoogleAuthProvider) {
-                    result = await nativeAuth.signInWithGoogle({
-                        skipNativeAuth: true,
-                        useCredentialManager: false
-                    });
-                } else if (provider instanceof firebase.auth.GithubAuthProvider) {
-                    result = await nativeAuth.signInWithGithub({ skipNativeAuth: true });
-                } else if (provider instanceof firebase.auth.TwitterAuthProvider) {
-                    result = await nativeAuth.signInWithTwitter({ skipNativeAuth: true });
+                if (isTrenditAndroid) {
+                    // Firebase recommends redirect over popup on mobile. The
+                    // Android build runs at https://localhost, which satisfies
+                    // the Firebase Web SDK's HTTPS requirement.
+                    await auth.signInWithRedirect(provider);
                 } else {
-                    throw new Error('Unsupported Android sign-in provider.');
+                    await auth.signInWithPopup(provider);
                 }
-
-                const nativeCredential = result && result.credential;
-                if (!nativeCredential) {
-                    throw new Error('The identity provider did not return an authentication credential.');
-                }
-
-                let firebaseCredential;
-                switch (nativeCredential.providerId) {
-                    case 'google.com':
-                        if (!nativeCredential.idToken) {
-                            throw new Error('Google did not return an ID token.');
-                        }
-                        firebaseCredential = firebase.auth.GoogleAuthProvider.credential(
-                            nativeCredential.idToken,
-                            nativeCredential.accessToken || null
-                        );
-                        break;
-                    case 'github.com':
-                        if (!nativeCredential.accessToken) {
-                            throw new Error('GitHub did not return an access token.');
-                        }
-                        firebaseCredential = firebase.auth.GithubAuthProvider.credential(nativeCredential.accessToken);
-                        break;
-                    case 'twitter.com':
-                        if (!nativeCredential.accessToken || !nativeCredential.secret) {
-                            throw new Error('Twitter did not return the required OAuth credentials.');
-                        }
-                        firebaseCredential = firebase.auth.TwitterAuthProvider.credential(
-                            nativeCredential.accessToken,
-                            nativeCredential.secret
-                        );
-                        break;
-                    default:
-                        throw new Error('Unknown OAuth provider: ' + nativeCredential.providerId);
-                }
-
-                await auth.signInWithCredential(firebaseCredential);
             } catch (error) {
                 console.error('[Trendit Auth] provider sign-in failed:', error);
                 alert(error && error.message ? error.message : String(error));
@@ -2705,17 +2730,12 @@
             return (hash % 2147483646) + 1;
         }
 
-        // Capacitor Android loads the app from the local WebView origin, so a
-        // relative '/.netlify/functions/...' URL would incorrectly point at
-        // https://localhost instead of the public Netlify site. Keep the
-        // relative endpoint for the normal web app and use the live Netlify
-        // function directly on Android. The Agora app certificate stays
-        // server-side in Netlify environment variables.
+        // When Trendit runs inside Capacitor, relative URLs resolve to
+        // https://localhost and therefore cannot reach the Netlify function.
+        // Set window.TRENDIt_AGORA_TOKEN_ENDPOINT to the public Netlify
+        // function URL for the production Android build.
         const TRENDIt_AGORA_TOKEN_ENDPOINT =
-            window.TRENDIt_AGORA_TOKEN_ENDPOINT ||
-            (isTrenditAndroid
-                ? 'https://trenditsocilas.netlify.app/.netlify/functions/agora-token'
-                : '/.netlify/functions/agora-token');
+            window.TRENDIt_AGORA_TOKEN_ENDPOINT || '/.netlify/functions/agora-token';
 
         async function getAgoraToken(channel, uid) {
             const response = await fetch(TRENDIt_AGORA_TOKEN_ENDPOINT, {
