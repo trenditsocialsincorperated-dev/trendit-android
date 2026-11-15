@@ -1,9 +1,17 @@
+
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import {
+  getAuth,
+  initializeAuth,
+  indexedDBLocalPersistence,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
-// Preserves the existing live Trendit Firebase project (trend-it-c7ea4)
+// Preserves the existing live Trendit Firebase project
 // while allowing optional VITE_FIREBASE_* environment overrides.
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDn2cYKArmlHgfva7QFOtpOFppemZVdpjk',
@@ -16,14 +24,39 @@ export const firebaseConfig = {
 };
 
 export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+function createFirebaseAuth() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      return initializeAuth(app, {
+        persistence: indexedDBLocalPersistence
+      });
+    } catch (error) {
+      // Auth may already have been initialized by another module.
+      if (
+        error instanceof Error &&
+        (error as { code?: string }).code === 'auth/already-initialized'
+      ) {
+        return getAuth(app);
+      }
+
+      throw error;
+    }
+  }
+
+  const webAuth = getAuth(app);
+
+  setPersistence(webAuth, browserLocalPersistence).catch((error) => {
+    console.warn('Auth persistence setup notice:', error);
+  });
+
+  return webAuth;
+}
+
+export const auth = createFirebaseAuth();
+
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-
-// Enforce persistent local auth session across Web & Capacitor Android WebView
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn('Auth persistence setup notice:', err);
-});
 
 export enum OperationType {
   CREATE = 'create',
@@ -73,6 +106,7 @@ export function formatFirestoreError(
     operationType,
     path,
   };
+
   console.error('Firestore Error:', JSON.stringify(errInfo));
   return errInfo;
 }
@@ -87,14 +121,22 @@ export function handleFirestoreError(
 }
 
 let connectionTested = false;
+
 export async function verifyFirestoreConnection(): Promise<void> {
   if (connectionTested) return;
+
   connectionTested = true;
+
   try {
     await getDocFromServer(doc(db, 'posts', '__connection_probe__'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration or network connection.');
+    if (
+      error instanceof Error &&
+      error.message.includes('the client is offline')
+    ) {
+      console.error(
+        'Please check your Firebase configuration or network connection.'
+      );
     }
   }
 }
