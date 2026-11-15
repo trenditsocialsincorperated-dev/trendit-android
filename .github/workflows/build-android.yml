@@ -1,7 +1,11 @@
+
 name: Build Trendit Android APK
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -14,7 +18,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: npm install
@@ -28,21 +32,39 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
+          packages: platform-tools
 
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Create Android project
-        run: npx cap add android
+      - name: Create Android project if missing
+        run: |
+          if [ -f android/app/src/main/AndroidManifest.xml ]; then
+            echo "Existing Trendit Android project found. Preserving native files."
+          elif [ -d android ]; then
+            echo "Android directory exists but the Android project is incomplete."
+            exit 1
+          else
+            npx cap add android
+          fi
 
       - name: Add Firebase Android configuration
         env:
           FIREBASE_GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
         run: |
-          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON" ]; then
+            echo "FIREBASE_GOOGLE_SERVICES_JSON GitHub secret is missing."
+            exit 1
+          fi
+
+          mkdir -p android/app
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" \
+            > android/app/google-services.json
+
+          python3 -m json.tool android/app/google-services.json > /dev/null
+          echo "Firebase Android configuration installed."
 
       - name: Add Android media, call, and notification permissions
         run: |
@@ -84,11 +106,10 @@ jobs:
 
               manifest.write_text(text)
 
-          print("AndroidManifest.xml permissions:")
-          print(manifest.read_text())
+          print("Android permissions configured.")
           PY
 
-      - name: Install Trendit launcher icon from the existing logo
+      - name: Install Trendit launcher icon
         run: |
           sudo apt-get update
           sudo apt-get install -y imagemagick
@@ -100,29 +121,30 @@ jobs:
           matches = []
 
           for path in Path(".").rglob("*.html"):
+              if "node_modules" in path.parts:
+                  continue
+
               try:
-                  text = path.read_text(errors="ignore")
+                  content = path.read_text(errors="ignore")
               except Exception:
                   continue
 
               found = re.findall(
                   r'https://i\.postimg\.cc/[^"\']*IMG-20260902-WA0001\.jpg',
-                  text
+                  content
               )
 
               matches.extend(found)
 
           if not matches:
               raise SystemExit(
-                  "Could not find the existing Trendit logo URL in the HTML files."
+                  "Could not find the existing Trendit logo URL in HTML files."
               )
 
           logo_url = matches[0]
-
           Path("/tmp/trendit_logo_url").write_text(logo_url)
 
-          print("Found Trendit logo source in the project.")
-          print(logo_url)
+          print("Found the existing Trendit logo.")
           PY
 
           LOGO_URL="$(cat /tmp/trendit_logo_url)"
@@ -162,15 +184,15 @@ jobs:
               "$OUTPUT"
           }
 
-          create_icon 48  "$RES/mipmap-mdpi/ic_launcher.png"
-          create_icon 72  "$RES/mipmap-hdpi/ic_launcher.png"
-          create_icon 96  "$RES/mipmap-xhdpi/ic_launcher.png"
+          create_icon 48 "$RES/mipmap-mdpi/ic_launcher.png"
+          create_icon 72 "$RES/mipmap-hdpi/ic_launcher.png"
+          create_icon 96 "$RES/mipmap-xhdpi/ic_launcher.png"
           create_icon 144 "$RES/mipmap-xxhdpi/ic_launcher.png"
           create_icon 192 "$RES/mipmap-xxxhdpi/ic_launcher.png"
 
-          create_icon 48  "$RES/mipmap-mdpi/ic_launcher_round.png"
-          create_icon 72  "$RES/mipmap-hdpi/ic_launcher_round.png"
-          create_icon 96  "$RES/mipmap-xhdpi/ic_launcher_round.png"
+          create_icon 48 "$RES/mipmap-mdpi/ic_launcher_round.png"
+          create_icon 72 "$RES/mipmap-hdpi/ic_launcher_round.png"
+          create_icon 96 "$RES/mipmap-xhdpi/ic_launcher_round.png"
           create_icon 144 "$RES/mipmap-xxhdpi/ic_launcher_round.png"
           create_icon 192 "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
 
@@ -214,7 +236,6 @@ jobs:
               )
 
           manifest.write_text(text)
-
           print("Trendit launcher icon configured.")
           PY
 
@@ -225,23 +246,29 @@ jobs:
         id: debug-keystore-cache
         uses: actions/cache@v4
         with:
-          path: ~/.config/.android/debug.keystore
-          key: trendit-android-debug-keystore-v2
+          path: ~/.android/debug.keystore
+          key: trendit-android-debug-keystore-v3
 
       - name: Create Android debug keystore if needed
         if: steps.debug-keystore-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$HOME/.config/.android"
+          mkdir -p "$HOME/.android"
 
           keytool -genkeypair \
-            -keystore "$HOME/.config/.android/debug.keystore" \
+            -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
             -keypass android \
-            -alias AndroidDebugKey \
+            -alias androiddebugkey \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Build Trendit web application
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
 
       - name: Get Android signing fingerprints
         working-directory: android
@@ -249,41 +276,26 @@ jobs:
           chmod +x gradlew
           ./gradlew signingReport
 
-      - name: Sync Capacitor
-        run: npx cap sync android
-
-      - name: Verify Android permissions and launcher icon
+      - name: Verify Android configuration
         run: |
           echo "Checking Android permissions..."
 
-          grep -q 'android.permission.CAMERA' \
-            android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.CAMERA' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.RECORD_AUDIO' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.MODIFY_AUDIO_SETTINGS' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_IMAGES' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_VIDEO' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_AUDIO' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.POST_NOTIFICATIONS' android/app/src/main/AndroidManifest.xml
 
-          grep -q 'android.permission.RECORD_AUDIO' \
-            android/app/src/main/AndroidManifest.xml
-
-          grep -q 'android.permission.MODIFY_AUDIO_SETTINGS' \
-            android/app/src/main/AndroidManifest.xml
-
-          grep -q 'android.permission.READ_MEDIA_IMAGES' \
-            android/app/src/main/AndroidManifest.xml
-
-          grep -q 'android.permission.READ_MEDIA_VIDEO' \
-            android/app/src/main/AndroidManifest.xml
-
-          grep -q 'android.permission.READ_MEDIA_AUDIO' \
-            android/app/src/main/AndroidManifest.xml
-
-          grep -q 'android.permission.POST_NOTIFICATIONS' \
-            android/app/src/main/AndroidManifest.xml
-
+          test -s android/app/google-services.json
           test -f android/app/src/main/res/mipmap-mdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-hdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
-          echo "All required permissions and launcher icon files are present."
+          echo "Android configuration checks passed."
 
       - name: Build Debug APK
         working-directory: android
@@ -296,3 +308,4 @@ jobs:
         with:
           name: Trendit-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
