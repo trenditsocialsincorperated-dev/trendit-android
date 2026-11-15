@@ -1,4 +1,3 @@
-
 name: Build Trendit Android APK
 
 on:
@@ -242,27 +241,37 @@ jobs:
           echo "Generated launcher icons:"
           find "$RES" -path '*/mipmap-*/*ic_launcher*.png' -type f -print
 
+      # FIXED: Use the exact directory Gradle expects.
       - name: Restore stable Android debug keystore
         id: debug-keystore-cache
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: trendit-android-debug-keystore-v3
+          path: ~/.config/.android/debug.keystore
+          key: trendit-android-debug-keystore-v4
 
       - name: Create Android debug keystore if needed
         if: steps.debug-keystore-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$HOME/.android"
+          mkdir -p "$HOME/.config/.android"
 
-          keytool -genkeypair \
-            -keystore "$HOME/.android/debug.keystore" \
+          keytool -genkeypair -v \
+            -keystore "$HOME/.config/.android/debug.keystore" \
             -storepass android \
             -keypass android \
-            -alias androiddebugkey \
+            -alias AndroidDebugKey \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Verify Android debug keystore
+        run: |
+          test -f "$HOME/.config/.android/debug.keystore"
+
+          keytool -list -v \
+            -keystore "$HOME/.config/.android/debug.keystore" \
+            -storepass android \
+            -alias AndroidDebugKey
 
       - name: Build Trendit web application
         run: npm run build
