@@ -1,0 +1,6 @@
+{
+  "name": "Trendit",
+  "description": "Vibrant modern social media platform featuring real-time feeds, stories, reels, polls, direct messaging, and live HD audio & video calling.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

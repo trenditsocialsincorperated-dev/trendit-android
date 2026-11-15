@@ -1,16 +1,15 @@
-/// <reference types="@capacitor-firebase/authentication" />
-
-import { CapacitorConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.trendit.app',
   appName: 'Trendit',
-  webDir: 'www',
-  plugins: {
-    FirebaseAuthentication: {
-      skipNativeAuth: true,
-      providers: ['google.com', 'github.com', 'twitter.com']
-    }
+  webDir: 'dist',
+  server: {
+    androidScheme: 'https',
+    cleartext: true
+  },
+  android: {
+    allowMixedContent: true
   }
 };
 

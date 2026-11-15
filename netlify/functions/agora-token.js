@@ -1,6 +1,6 @@
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
 
-const APP_ID = process.env.AGORA_APP_ID;
+const APP_ID = process.env.AGORA_APP_ID || '02fde73deba244599248162cca0c8baf';
 const APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
 const TOKEN_EXPIRATION_SECONDS = 3600;
 
@@ -24,8 +24,8 @@ exports.handler = async (event) => {
     return json(405, { error: 'Method not allowed. Use POST.' });
   }
 
-  if (!APP_ID || !APP_CERTIFICATE) {
-    console.error('Missing AGORA_APP_ID or AGORA_APP_CERTIFICATE environment variable.');
+  if (!APP_ID) {
+    console.error('Missing AGORA_APP_ID environment variable.');
     return json(500, { error: 'Agora token server is not configured.' });
   }
 
@@ -48,20 +48,23 @@ exports.handler = async (event) => {
   }
 
   try {
-    const currentTimestamp = Math.floor(Date.now() / 1000);
-    const privilegeExpiredTs = currentTimestamp + TOKEN_EXPIRATION_SECONDS;
-
-    const token = RtcTokenBuilder.buildTokenWithUid(
-      APP_ID,
-      APP_CERTIFICATE,
-      channel,
-      uidNumber,
-      RtcRole.PUBLISHER,
-      privilegeExpiredTs
-    );
+    let token = null;
+    if (APP_CERTIFICATE) {
+      token = RtcTokenBuilder.buildTokenWithUid(
+        APP_ID,
+        APP_CERTIFICATE,
+        channel,
+        uidNumber,
+        RtcRole.PUBLISHER,
+        TOKEN_EXPIRATION_SECONDS,
+        TOKEN_EXPIRATION_SECONDS
+      );
+    }
 
     return json(200, {
       token,
+      appId: APP_ID,
+      certificateConfigured: Boolean(APP_CERTIFICATE),
       uid: uidNumber,
       channel,
       expiresIn: TOKEN_EXPIRATION_SECONDS

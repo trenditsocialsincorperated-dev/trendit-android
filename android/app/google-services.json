@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "757837469928",
+    "project_id": "trend-it-c7ea4",
+    "storage_bucket": "trend-it-c7ea4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:757837469928:android:fb68b6644dea29fedb515d",
+        "android_client_info": {
+          "package_name": "com.trendit.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "757837469928-5talutd5uepm24c6oc7p6tc873hnl7e9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.trendit.app",
+            "certificate_hash": "f8513d927fddd44245b49e8431a3ae930f1276d8"
+          }
+        },
+        {
+          "client_id": "757837469928-39sqa5oln5q9c44teqqu2o6pdara2p2l.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDV14Wa8eMGDGcMhbGsVqja4XR7MxGAZas"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "757837469928-39sqa5oln5q9c44teqqu2o6pdara2p2l.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
