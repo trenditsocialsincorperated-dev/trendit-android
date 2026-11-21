@@ -1,0 +1,100 @@
+
+name: Diagnose Trendit Post Notifications
+
+on:
+  workflow_dispatch:
+    inputs:
+      account_a_uid:
+        description: "Firebase Authentication UID of Account A"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Firebase Admin SDK
+        run: npm install --no-save --package-lock=false firebase-admin
+
+      - name: Inspect post notifications
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ACCOUNT_A_UID: ${{ inputs.account_a_uid }}
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          async function main() {
+            const credentials = JSON.parse(
+              process.env.FIREBASE_SERVICE_ACCOUNT
+            );
+
+            if (!credentials.project_id || !credentials.private_key) {
+              throw new Error('Invalid Firebase Admin credentials.');
+            }
+
+            admin.initializeApp({
+              credential: admin.credential.cert(credentials)
+            });
+
+            const db = admin.firestore();
+
+            const snapshot = await db
+              .collection('notifications')
+              .where('type', '==', 'post')
+              .limit(200)
+              .get();
+
+            const targetUid = process.env.ACCOUNT_A_UID;
+
+            let missingUid = 0;
+            let matchingUid = 0;
+            let otherUid = 0;
+            let missingPostId = 0;
+
+            console.log('Firebase project connected successfully.');
+            console.log(`Post notifications inspected: ${snapshot.size}`);
+
+            snapshot.forEach(doc => {
+              const data = doc.data();
+
+              if (!data.recipientUid) {
+                missingUid++;
+              } else if (data.recipientUid === targetUid) {
+                matchingUid++;
+              } else {
+                otherUid++;
+              }
+
+              if (!data.postId) {
+                missingPostId++;
+              }
+            });
+
+            console.log('--- DIAGNOSTIC RESULTS ---');
+            console.log(`Account A matches: ${matchingUid}`);
+            console.log(`Other recipients: ${otherUid}`);
+            console.log(`Missing recipientUid: ${missingUid}`);
+            console.log(`Missing postId: ${missingPostId}`);
+
+            if (matchingUid > 0) {
+              console.log('RESULT: Post notifications exist for Account A.');
+            } else {
+              console.log('RESULT: No matching post notification found in the inspected records.');
+            }
+          }
+
+          main().catch(error => {
+            console.error('Diagnostic failed:', error.message);
+            process.exit(1);
+          });
+          NODE
