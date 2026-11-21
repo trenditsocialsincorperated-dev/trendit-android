@@ -25,7 +25,7 @@ jobs:
       - name: Install Firebase Admin SDK
         run: npm install --no-save --package-lock=false firebase-admin
 
-      - name: Check publisher followers
+      - name: Inspect follower structure
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ACCOUNT_A_UID: ${{ inputs.account_a_uid }}
@@ -35,29 +35,36 @@ jobs:
           const { getFirestore } = require('firebase-admin/firestore');
 
           async function main() {
-            const credentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+            const credentials = JSON.parse(
+              process.env.FIREBASE_SERVICE_ACCOUNT
+            );
 
             initializeApp({ credential: cert(credentials) });
 
             const db = getFirestore();
             const targetUid = process.env.ACCOUNT_A_UID;
 
-            const snapshot = await db.collection('notifications')
+            const posts = await db.collection('notifications')
               .where('type', '==', 'post')
               .limit(200)
               .get();
 
             const publishers = new Set();
 
-            snapshot.forEach(doc => {
-              const data = doc.data();
-              if (data.senderUid) publishers.add(data.senderUid);
+            posts.forEach(doc => {
+              const senderUid = doc.data().senderUid;
+              if (senderUid) publishers.add(senderUid);
             });
 
-            console.log(`Post notifications inspected: ${snapshot.size}`);
             console.log(`Publishers found: ${publishers.size}`);
 
-            let accountAFollowsPublisher = false;
+            const possibleUidFields = [
+              'uid',
+              'userId',
+              'followerUid',
+              'followingUid',
+              'followerId'
+            ];
 
             for (const publisherUid of publishers) {
               const followers = await db
@@ -66,21 +73,41 @@ jobs:
                 .collection('followers')
                 .get();
 
-              const isFollower = followers.docs.some(
-                doc => doc.id === targetUid
-              );
+              let docIdMatch = false;
+              let fieldMatch = false;
 
-              console.log('--- Publisher check ---');
-              console.log(`Followers found: ${followers.size}`);
-              console.log(`Account A is a follower: ${isFollower}`);
+              console.log(`Followers collection size: ${followers.size}`);
 
-              if (isFollower) accountAFollowsPublisher = true;
+              for (const follower of followers.docs) {
+                const data = follower.data();
+
+                if (follower.id === targetUid) {
+                  docIdMatch = true;
+                }
+
+                for (const field of possibleUidFields) {
+                  if (data[field] === targetUid) {
+                    fieldMatch = true;
+                  }
+                }
+
+                console.log(
+                  `Follower document fields: ${Object.keys(data).join(', ') || '(none)'}`
+                );
+              }
+
+              const followingDoc = await db
+                .collection('users')
+                .doc(targetUid)
+                .collection('following')
+                .doc(publisherUid)
+                .get();
+
+              console.log('--- RESULTS ---');
+              console.log(`Account A matches follower document ID: ${docIdMatch}`);
+              console.log(`Account A matches a UID field: ${fieldMatch}`);
+              console.log(`Account A has publisher in following: ${followingDoc.exists}`);
             }
-
-            console.log('--- FINAL RESULT ---');
-            console.log(
-              `Account A found in publisher followers: ${accountAFollowsPublisher}`
-            );
           }
 
           main().catch(error => {
