@@ -120,7 +120,6 @@ export interface DmMessage {
   text?: string;
   mediaUrl?: string | null;
   mediaType?: MediaType | null;
-  // Call history fields (preserved from Trendit schema)
   callerUid?: string;
   calleeUid?: string;
   callType?: 'audio' | 'video';
@@ -147,7 +146,15 @@ export interface CallSession {
   endedAt?: FirestoreTimestamp;
 }
 
-export type NotificationType = 'like' | 'reply' | 'follow' | 'comment' | 'dm' | 'call';
+export type NotificationType =
+  | 'like'
+  | 'reply'
+  | 'follow'
+  | 'unfollow'
+  | 'post'
+  | 'comment'
+  | 'dm'
+  | 'call';
 
 export interface AppNotification {
   id: string;

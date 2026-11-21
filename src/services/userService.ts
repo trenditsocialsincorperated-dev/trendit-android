@@ -47,7 +47,6 @@ export async function resolveUserAvatarUrl(
     }
   }
 
-  // Avoid external fragile avatar generators if offline; allow valid http(s) & data URIs
   avatarResolutionCache.set(raw, raw);
   return raw;
 }
@@ -113,6 +112,14 @@ export async function toggleFollowUser(
     batch.delete(myFollowingRef);
     batch.delete(targetFollowerRef);
     await batch.commit();
+
+    void sendSocialNotification({
+      recipientUid: targetUid,
+      sender: currentUser,
+      type: 'unfollow',
+      text: `${currentUser.displayName} unfollowed you.`,
+    }).catch((err) => console.warn('Unfollow notification failed:', err));
+
     return { isFollowing: false };
   } else {
     batch.set(myFollowingRef, {
@@ -125,12 +132,12 @@ export async function toggleFollowUser(
     });
     await batch.commit();
 
-    sendSocialNotification({
+    void sendSocialNotification({
       recipientUid: targetUid,
       sender: currentUser,
       type: 'follow',
       text: `${currentUser.displayName} started following you.`,
-    }).catch(() => {});
+    }).catch((err) => console.warn('Follow notification failed:', err));
 
     return { isFollowing: true };
   }

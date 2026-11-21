@@ -24,9 +24,8 @@ export interface CreateNotificationParams {
 }
 
 /**
- * Preserves Trendit's in-app Firestore notification creation AND invokes the
- * authenticated backend social-push endpoint (/.netlify/functions/social-push)
- * for FCM push delivery. Push failures never break social actions.
+ * Creates the in-app Firestore notification and requests FCM delivery from
+ * the authenticated social-push backend. Push failures never break social actions.
  */
 export async function sendSocialNotification({
   recipientUid,
@@ -53,27 +52,45 @@ export async function sendSocialNotification({
     });
 
     const signedInUser = auth.currentUser;
-    if (signedInUser) {
-      const idToken = await signedInUser.getIdToken();
-      fetch('/.netlify/functions/social-push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          recipientUid,
-          type,
-          text,
-          postId: postId || null,
-          callId: callId || null,
-        }),
-      }).catch((pushErr) => {
-        console.warn('Background push trigger notice:', pushErr);
+    if (!signedInUser) {
+      console.warn('Social push skipped: no signed-in Firebase user.');
+      return;
+    }
+
+    const idToken = await signedInUser.getIdToken();
+    const response = await fetch('/.netlify/functions/social-push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        recipientUid,
+        type,
+        text,
+        postId: postId || null,
+        callId: callId || null,
+      }),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.sent === false) {
+      console.warn('Social push was not delivered:', {
+        status: response.status,
+        type,
+        recipientUid,
+        result,
+      });
+    } else {
+      console.info('Social push backend response:', {
+        status: response.status,
+        type,
+        recipientUid,
+        result,
       });
     }
   } catch (err) {
-    console.warn('Failed to create notification:', err);
+    console.warn('Failed to create/send social notification:', err);
   }
 }
 

@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -148,8 +149,35 @@ export async function createNewPost({
     payload.repostOf = repostOf;
   }
 
-  const ref = await addDoc(collection(db, 'posts'), payload);
-  return ref.id;
+  const postRef = await addDoc(collection(db, 'posts'), payload);
+
+  // Notify the author's existing followers after the post has been saved.
+  // Push failures must never undo or block a successfully-created post.
+  void (async () => {
+    try {
+      const followers = await getDocs(collection(db, 'users', author.uid, 'followers'));
+      const followerDocs = followers.docs.filter((follower) => follower.id !== author.uid);
+
+      for (let index = 0; index < followerDocs.length; index += 20) {
+        const batch = followerDocs.slice(index, index + 20);
+        await Promise.allSettled(
+          batch.map((follower) =>
+            sendSocialNotification({
+              recipientUid: follower.id,
+              sender: author,
+              type: 'post',
+              text: `${author.displayName || 'Someone'} shared a new post.`,
+              postId: postRef.id,
+            })
+          )
+        );
+      }
+    } catch (err) {
+      console.warn('Post follower notifications failed:', err);
+    }
+  })();
+
+  return postRef.id;
 }
 
 export async function voteOnPostPoll(
@@ -313,7 +341,6 @@ export function computeTrendingFromPosts(posts: Post[]): TrendingTopic[] {
     return dynamicTopics;
   }
 
-  // Supplement with Trendit's signature discovery topics counted against real posts
   const seedTopics: { tag: string; keyword: string; category: string }[] = [
     { tag: '#WebDev', keyword: 'web', category: 'Technology · Trending' },
     { tag: '#ArtificialIntelligence', keyword: 'ai', category: 'AI & Tech · Trending' },

@@ -73,7 +73,7 @@ exports.handler = async (event) => {
     recipientUid.length > 200 ||
     !text ||
     text.length > 500 ||
-    !['like', 'follow', 'reply', 'comment', 'dm', 'call'].includes(type)
+    !['like', 'follow', 'unfollow', 'post', 'reply', 'comment', 'dm', 'call'].includes(type)
   ) {
     return json(400, { error: 'Invalid notification details.' });
   }
@@ -111,6 +111,8 @@ exports.handler = async (event) => {
     const titleByType = {
       like: 'New like on Trendit',
       follow: 'New follower on Trendit',
+      unfollow: 'Someone unfollowed you on Trendit',
+      post: `New post from ${senderName}`,
       reply: 'New reply on Trendit',
       comment: 'New comment on Trendit',
       dm: `New message from ${senderName}`,
