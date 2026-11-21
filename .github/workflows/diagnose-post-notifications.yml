@@ -31,9 +31,14 @@ jobs:
           ACCOUNT_A_UID: ${{ inputs.account_a_uid }}
         run: |
           node <<'NODE'
-          const admin = require('firebase-admin');
+          const { initializeApp, cert } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
 
           async function main() {
+            if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+              throw new Error('Firebase service account secret is missing.');
+            }
+
             const credentials = JSON.parse(
               process.env.FIREBASE_SERVICE_ACCOUNT
             );
@@ -42,19 +47,23 @@ jobs:
               throw new Error('Invalid Firebase Admin credentials.');
             }
 
-            admin.initializeApp({
-              credential: admin.credential.cert(credentials)
+            initializeApp({
+              credential: cert(credentials)
             });
 
-            const db = admin.firestore();
+            const db = getFirestore();
+
+            const targetUid = process.env.ACCOUNT_A_UID;
+
+            if (!targetUid) {
+              throw new Error('Account A UID is missing.');
+            }
 
             const snapshot = await db
               .collection('notifications')
               .where('type', '==', 'post')
               .limit(200)
               .get();
-
-            const targetUid = process.env.ACCOUNT_A_UID;
 
             let missingUid = 0;
             let matchingUid = 0;
