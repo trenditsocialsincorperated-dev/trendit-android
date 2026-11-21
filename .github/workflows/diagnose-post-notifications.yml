@@ -25,7 +25,7 @@ jobs:
       - name: Install Firebase Admin SDK
         run: npm install --no-save --package-lock=false firebase-admin
 
-      - name: Inspect post notifications
+      - name: Check publisher followers
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ACCOUNT_A_UID: ${{ inputs.account_a_uid }}
@@ -35,71 +35,52 @@ jobs:
           const { getFirestore } = require('firebase-admin/firestore');
 
           async function main() {
-            if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-              throw new Error('Firebase service account secret is missing.');
-            }
+            const credentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-            const credentials = JSON.parse(
-              process.env.FIREBASE_SERVICE_ACCOUNT
-            );
-
-            if (!credentials.project_id || !credentials.private_key) {
-              throw new Error('Invalid Firebase Admin credentials.');
-            }
-
-            initializeApp({
-              credential: cert(credentials)
-            });
+            initializeApp({ credential: cert(credentials) });
 
             const db = getFirestore();
-
             const targetUid = process.env.ACCOUNT_A_UID;
 
-            if (!targetUid) {
-              throw new Error('Account A UID is missing.');
-            }
-
-            const snapshot = await db
-              .collection('notifications')
+            const snapshot = await db.collection('notifications')
               .where('type', '==', 'post')
               .limit(200)
               .get();
 
-            let missingUid = 0;
-            let matchingUid = 0;
-            let otherUid = 0;
-            let missingPostId = 0;
-
-            console.log('Firebase project connected successfully.');
-            console.log(`Post notifications inspected: ${snapshot.size}`);
+            const publishers = new Set();
 
             snapshot.forEach(doc => {
               const data = doc.data();
-
-              if (!data.recipientUid) {
-                missingUid++;
-              } else if (data.recipientUid === targetUid) {
-                matchingUid++;
-              } else {
-                otherUid++;
-              }
-
-              if (!data.postId) {
-                missingPostId++;
-              }
+              if (data.senderUid) publishers.add(data.senderUid);
             });
 
-            console.log('--- DIAGNOSTIC RESULTS ---');
-            console.log(`Account A matches: ${matchingUid}`);
-            console.log(`Other recipients: ${otherUid}`);
-            console.log(`Missing recipientUid: ${missingUid}`);
-            console.log(`Missing postId: ${missingPostId}`);
+            console.log(`Post notifications inspected: ${snapshot.size}`);
+            console.log(`Publishers found: ${publishers.size}`);
 
-            if (matchingUid > 0) {
-              console.log('RESULT: Post notifications exist for Account A.');
-            } else {
-              console.log('RESULT: No matching post notification found in the inspected records.');
+            let accountAFollowsPublisher = false;
+
+            for (const publisherUid of publishers) {
+              const followers = await db
+                .collection('users')
+                .doc(publisherUid)
+                .collection('followers')
+                .get();
+
+              const isFollower = followers.docs.some(
+                doc => doc.id === targetUid
+              );
+
+              console.log('--- Publisher check ---');
+              console.log(`Followers found: ${followers.size}`);
+              console.log(`Account A is a follower: ${isFollower}`);
+
+              if (isFollower) accountAFollowsPublisher = true;
             }
+
+            console.log('--- FINAL RESULT ---');
+            console.log(
+              `Account A found in publisher followers: ${accountAFollowsPublisher}`
+            );
           }
 
           main().catch(error => {
