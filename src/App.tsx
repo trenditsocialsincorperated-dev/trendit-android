@@ -1,10 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   BrowserRouter,
   Navigate,
   Route,
   Routes,
   useLocation,
+  useNavigate,
 } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { ThemeProvider } from '@/contexts/ThemeContext';
@@ -24,6 +26,16 @@ import { BookmarksPage } from '@/pages/BookmarksPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 
+interface PushTapPayload {
+  type?: string;
+  recipientUid?: string;
+  senderUid?: string;
+  senderName?: string;
+  postId?: string;
+  title?: string;
+  body?: string;
+}
+
 const ScrollToTopOnRouteChange: React.FC = () => {
   const { pathname } = useLocation();
 
@@ -34,8 +46,72 @@ const ScrollToTopOnRouteChange: React.FC = () => {
   return null;
 };
 
+/**
+ * Receives notification taps from the Android NativePush bridge.
+ *
+ * The native plugin retains launch intents until this listener is ready, so
+ * this also handles taps that start Trendit from a fully closed state.
+ */
 const AppRoutes: React.FC = () => {
   const { firebaseUser, loading } = useAuth();
+  const navigate = useNavigate();
+  const [pendingPushAction, setPendingPushAction] = useState<PushTapPayload | null>(null);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const nativePush = (window as any).Capacitor?.Plugins?.NativePush;
+    if (!nativePush?.addListener) return;
+
+    let active = true;
+    let listenerHandle: { remove: () => Promise<void> } | undefined;
+
+    nativePush
+      .addListener('notificationAction', (payload: PushTapPayload) => {
+        if (!active || !payload || typeof payload !== 'object') return;
+        setPendingPushAction(payload);
+      })
+      .then((handle: { remove: () => Promise<void> }) => {
+        if (!active) {
+          void handle.remove();
+          return;
+        }
+        listenerHandle = handle;
+      })
+      .catch((error: unknown) => {
+        console.warn('Could not attach Android notification-tap listener:', error);
+      });
+
+    return () => {
+      active = false;
+      if (listenerHandle) void listenerHandle.remove();
+    };
+  }, []);
+
+  // Wait for Firebase authentication before navigating. This preserves a
+  // notification tap received while the app is starting or showing login.
+  useEffect(() => {
+    if (loading || !firebaseUser || !pendingPushAction) return;
+
+    const type = String(pendingPushAction.type || '').toLowerCase();
+    const postId = String(pendingPushAction.postId || '').trim();
+    const senderUid = String(pendingPushAction.senderUid || '').trim();
+
+    let destination: string | null = null;
+
+    // Match the in-app notification navigation priority.
+    if (postId) {
+      destination = `/post/${encodeURIComponent(postId)}`;
+    } else if (type === 'dm' || type === 'call') {
+      if (senderUid) destination = `/messages/${encodeURIComponent(senderUid)}`;
+    } else if (senderUid) {
+      // Follow and unfollow notifications, plus other actor-only events.
+      destination = `/profile/${encodeURIComponent(senderUid)}`;
+    }
+
+    setPendingPushAction(null);
+    if (destination) navigate(destination);
+  }, [firebaseUser, loading, navigate, pendingPushAction]);
 
   if (loading) {
     return (
